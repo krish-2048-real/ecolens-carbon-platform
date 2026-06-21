@@ -7,10 +7,15 @@ provides FastAPI middleware for automatic request interception.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import List, Tuple
 
 from config import settings
+
+# Initialize module logger
+logger: logging.Logger = logging.getLogger("ecolens.security")
+
 
 
 # ---------------------------------------------------------------------------
@@ -146,14 +151,17 @@ class SecurityGuard:
         """
         for pattern in _COMPILED_INJECTION:
             if pattern.search(text):
+                logger.warning("Prompt injection detected: %s", pattern.pattern)
                 return False, f"Prompt injection detected: {pattern.pattern}"
 
         for pattern in _COMPILED_HTML:
             if pattern.search(text):
+                logger.warning("HTML/script injection detected: %s", pattern.pattern)
                 return False, f"HTML/script injection detected: {pattern.pattern}"
 
         for pattern in _COMPILED_SHELL:
             if pattern.search(text):
+                logger.warning("Shell metacharacter detected: %s", pattern.pattern)
                 return False, f"Shell metacharacter detected: {pattern.pattern}"
 
         return True, ""
@@ -185,4 +193,4 @@ class SecurityGuard:
 
 
 # Module-level singleton
-security_guard = SecurityGuard()
+security_guard: SecurityGuard = SecurityGuard()

@@ -87,6 +87,11 @@ def get_security_guard() -> SecurityGuard:
     return security_guard
 
 
+# Pre-compiled static keyword maps for fast-path keyword evaluation
+UTILITIES_KEYWORDS: frozenset[str] = frozenset({"kwh", "electricity", "bill", "power", "light"})
+FOOD_KEYWORDS: frozenset[str] = frozenset({"biryani", "meal", "chicken", "ate", "food", "lunch", "dinner"})
+
+
 def _get_mock_result(user_input: str) -> Dict[str, Any]:
     """Retrieve fallback mock data dictionary based on keyword analysis of user input.
 
@@ -99,7 +104,7 @@ def _get_mock_result(user_input: str) -> Dict[str, Any]:
     text_lower: str = user_input.lower()
     
     # 1. UTILITIES / ENERGY CASE
-    if any(k in text_lower for k in ["kwh", "electricity", "bill", "power", "light"]):
+    if any(k in text_lower for k in UTILITIES_KEYWORDS):
         return {
             "category": "Utilities",
             "estimated_carbon_kg": 145.0,
@@ -112,7 +117,7 @@ def _get_mock_result(user_input: str) -> Dict[str, Any]:
         }
         
     # 2. FOOD CASE
-    elif any(k in text_lower for k in ["biryani", "meal", "chicken", "ate", "food", "lunch", "dinner"]):
+    elif any(k in text_lower for k in FOOD_KEYWORDS):
         return {
             "category": "Food",
             "estimated_carbon_kg": 2.40,
@@ -346,7 +351,7 @@ async def analyze_image(
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all exception handler returning structured JSON errors.
 
     Args:

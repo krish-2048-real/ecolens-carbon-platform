@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from schemas import CarbonAnalysisResult
+from schemas import CarbonAnalysisResult, PersonalizedSwap
 
 
 def format_carbon_output(result: CarbonAnalysisResult) -> Dict[str, Any]:
@@ -64,7 +64,7 @@ def generate_accessibility_narrative(result: CarbonAnalysisResult) -> str:
     Returns:
         A human-readable narrative string optimized for TTS engines.
     """
-    top_swap = result.personalized_swaps[0] if result.personalized_swaps else None
+    top_swap: Optional[PersonalizedSwap] = result.personalized_swaps[0] if result.personalized_swaps else None
     swap_text: str = ""
     if top_swap:
         swap_text = (
@@ -98,7 +98,7 @@ def save_upload_file(file_bytes: bytes, filename: str, upload_dir: str) -> str:
     Raises:
         IOError: If the file cannot be written to disk.
     """
-    dir_path = Path(upload_dir)
+    dir_path: Path = Path(upload_dir)
     dir_path.mkdir(parents=True, exist_ok=True)
 
     safe_filename: str = Path(filename).name  # strip directory traversal
