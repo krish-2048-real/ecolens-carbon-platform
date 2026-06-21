@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -153,7 +153,7 @@ def _map_mock_result(mock_data: Dict[str, Any]) -> CarbonAnalysisResult:
         CarbonAnalysisResult: Validated Pydantic model for response serialization.
     """
     total_kg: float = mock_data["estimated_carbon_kg"]
-    swaps: list[PersonalizedSwap] = []
+    swaps: List[PersonalizedSwap] = []
     for s in mock_data["personalized_swaps"]:
         impact_reduction: float = 0.0
         if total_kg > 0:
@@ -174,6 +174,19 @@ def _map_mock_result(mock_data: Dict[str, Any]) -> CarbonAnalysisResult:
     )
 
 
+def _get_mock_analysis(user_input: str) -> CarbonAnalysisResult:
+    """Helper to get a mapped mock analysis result synchronously.
+
+    Args:
+        user_input: The input string to route and map.
+
+    Returns:
+        CarbonAnalysisResult: Mapped mock result model.
+    """
+    mock_dict: Dict[str, Any] = _get_mock_result(user_input)
+    return _map_mock_result(mock_dict)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -190,7 +203,7 @@ async def serve_frontend() -> FileResponse:
 
 
 @app.get("/health", response_model=HealthCheckResponse)
-async def health_check() -> HealthCheckResponse:
+def health_check() -> HealthCheckResponse:
     """Health check endpoint for monitoring.
 
     Returns:
@@ -226,6 +239,8 @@ async def analyze_text(
     logger.info("Received text analysis request")
 
     # Security check
+    is_safe: bool
+    reason: str
     is_safe, reason = guard.is_safe(description)
     if not is_safe:
         logger.warning("Security rejection for text input: %s", reason)
@@ -242,9 +257,10 @@ async def analyze_text(
             detail="Input too short or entirely filtered by security rules.",
         )
 
+    result: CarbonAnalysisResult
     try:
         if settings.GEMINI_API_KEY == "DEMO_MODE":
-            result = _map_mock_result(_get_mock_result(sanitized))
+            result = await run_in_threadpool(_get_mock_analysis, sanitized)
         else:
             client: EcoLensGeminiClient = get_gemini_client()
             # Offload blocking synchronous client network call to threadpool
@@ -257,12 +273,13 @@ async def analyze_text(
             result=result,
         )
     except Exception as e:
-        logger.warning(f"Live Gemini API hit a limit or exception: {str(e)}. Routing to keyword fallback.")
+        logger.warning("Live Gemini API hit a limit or exception: %s. Routing to keyword fallback.", e)
+        fallback_result: CarbonAnalysisResult = await run_in_threadpool(_get_mock_analysis, sanitized)
         return CarbonAnalysisResponse(
             success=True,
             input_type="text",
             timestamp=datetime.now(UTC).isoformat(),
-            result=_map_mock_result(_get_mock_result(sanitized)),
+            result=fallback_result,
         )
 
 
@@ -300,6 +317,8 @@ async def analyze_image(
         )
 
     # Security check
+    is_safe: bool
+    reason: str
     is_safe, reason = guard.is_safe(filename)
     if not is_safe:
         logger.warning("Security rejection for image filename: %s", reason)
@@ -321,9 +340,10 @@ async def analyze_image(
     # Determine MIME type
     mime_type: str = file.content_type or "image/jpeg"
 
+    result: CarbonAnalysisResult
     try:
         if settings.GEMINI_API_KEY == "DEMO_MODE":
-            result = _map_mock_result(_get_mock_result(filename))
+            result = await run_in_threadpool(_get_mock_analysis, filename)
         else:
             client: EcoLensGeminiClient = get_gemini_client()
             # Offload blocking synchronous client network call to threadpool
@@ -336,12 +356,13 @@ async def analyze_image(
             result=result,
         )
     except Exception as e:
-        logger.warning(f"Live Gemini API hit a limit or exception: {str(e)}. Routing to keyword fallback.")
+        logger.warning("Live Gemini API hit a limit or exception: %s. Routing to keyword fallback.", e)
+        fallback_result: CarbonAnalysisResult = await run_in_threadpool(_get_mock_analysis, filename)
         return CarbonAnalysisResponse(
             success=True,
             input_type="image",
             timestamp=datetime.now(UTC).isoformat(),
-            result=_map_mock_result(_get_mock_result(filename)),
+            result=fallback_result,
         )
 
 

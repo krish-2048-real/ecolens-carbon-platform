@@ -7,7 +7,7 @@ through Pydantic schema constraints.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, cast
 
 from google import genai
 from google.genai import types
@@ -108,7 +108,7 @@ class EcoLensGeminiClient:
             )
             if response.parsed is None:
                 raise GeminiClientError("Gemini returned an empty response.")
-            return response.parsed  # type: ignore[return-value]
+            return cast(CarbonAnalysisResult, response.parsed)
         except GeminiClientError:
             raise
         except Exception as exc:
@@ -147,7 +147,7 @@ class EcoLensGeminiClient:
             )
             if response.parsed is None:
                 raise GeminiClientError("Gemini returned an empty image response.")
-            return response.parsed  # type: ignore[return-value]
+            return cast(CarbonAnalysisResult, response.parsed)
         except GeminiClientError:
             raise
         except Exception as exc:
