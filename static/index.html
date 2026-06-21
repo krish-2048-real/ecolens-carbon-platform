@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="EcoLens - AI-powered Carbon Footprint Awareness Platform. Track and minimize your carbon output with personalized insights.">
+    <meta name="theme-color" content="#0d9668">
+    <title>EcoLens — Carbon Footprint Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- ============ HEADER ============ -->
+    <header class="header" id="header">
+        <div class="header-inner">
+            <div class="logo" id="logo">
+                <span class="logo-icon" aria-hidden="true">🌿</span>
+                <h1 class="logo-text">Eco<span class="logo-accent">Lens</span></h1>
+            </div>
+            <p class="tagline">AI-Powered Carbon Footprint Tracker</p>
+            <div class="header-badge" id="header-badge">
+                <span class="badge-dot"></span>
+                <span>Powered by Gemini</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content" id="main-content">
+        <!-- ============ INPUT SECTION ============ -->
+        <section class="input-section glass-card" id="input-section" aria-label="Carbon footprint input">
+            <h2 class="section-title">
+                <span class="section-icon" aria-hidden="true">📊</span>
+                Track Your Carbon Footprint
+            </h2>
+            <p class="section-desc">Describe an activity or upload a receipt to get your carbon impact analysis.</p>
+
+            <!-- Tab Switcher -->
+            <div class="tab-switcher" role="tablist" id="tab-switcher">
+                <button class="tab active" id="tab-text" role="tab" aria-selected="true" aria-controls="panel-text" data-tab="text">
+                    <span aria-hidden="true">✏️</span> Text Input
+                </button>
+                <button class="tab" id="tab-image" role="tab" aria-selected="false" aria-controls="panel-image" data-tab="image">
+                    <span aria-hidden="true">📷</span> Image Upload
+                </button>
+            </div>
+
+            <!-- Text Input Panel -->
+            <div class="tab-panel active" id="panel-text" role="tabpanel" aria-labelledby="tab-text">
+                <label for="text-input" class="input-label">Describe your activity, purchase, or meal:</label>
+                <textarea
+                    id="text-input"
+                    class="text-input"
+                    placeholder="e.g., I drove 30 km to work in a petrol car today..."
+                    rows="4"
+                    maxlength="2000"
+                    aria-describedby="text-char-count"
+                ></textarea>
+                <div class="input-footer">
+                    <span class="char-count" id="text-char-count">0 / 2000</span>
+                    <button class="btn btn-primary" id="btn-analyze-text" type="button">
+                        <span class="btn-icon" aria-hidden="true">⚡</span>
+                        Analyze Impact
+                    </button>
+                </div>
+            </div>
+
+            <!-- Image Upload Panel -->
+            <div class="tab-panel" id="panel-image" role="tabpanel" aria-labelledby="tab-image">
+                <div class="drop-zone" id="drop-zone" role="button" tabindex="0" aria-label="Upload receipt or bill image">
+                    <div class="drop-zone-content">
+                        <span class="drop-icon" aria-hidden="true">☁️</span>
+                        <p class="drop-text">Drag & drop a receipt or bill here</p>
+                        <p class="drop-subtext">or click to browse (JPG, PNG, WebP — max 10MB)</p>
+                    </div>
+                    <input type="file" id="file-input" class="file-input" accept=".jpg,.jpeg,.png,.webp" aria-hidden="true">
+                </div>
+                <div class="file-preview" id="file-preview" style="display:none;">
+                    <img id="preview-image" class="preview-image" alt="Uploaded receipt preview">
+                    <div class="file-info">
+                        <span id="file-name" class="file-name"></span>
+                        <button class="btn btn-ghost" id="btn-remove-file" type="button">✕ Remove</button>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-full" id="btn-analyze-image" type="button" disabled>
+                    <span class="btn-icon" aria-hidden="true">🔍</span>
+                    Analyze Receipt
+                </button>
+            </div>
+        </section>
+
+        <!-- ============ LOADING STATE ============ -->
+        <div class="loading-overlay" id="loading-overlay" style="display:none;" aria-live="assertive" aria-label="Analyzing your carbon footprint">
+            <div class="loading-content glass-card">
+                <div class="spinner" aria-hidden="true"></div>
+                <p class="loading-text">Analyzing your carbon footprint...</p>
+                <p class="loading-subtext">Gemini AI is crunching the numbers</p>
+            </div>
+        </div>
+
+        <!-- ============ RESULTS SECTION ============ -->
+        <section class="results-section" id="results-section" style="display:none;" aria-label="Carbon analysis results">
+            <!-- Carbon Metric Card -->
+            <div class="metric-card glass-card" id="metric-card">
+                <div class="metric-header">
+                    <span class="category-badge" id="result-category">Transportation</span>
+                    <span class="metric-label">Estimated Carbon Footprint</span>
+                </div>
+                <div class="metric-value-container">
+                    <span class="metric-value" id="result-carbon-kg">0.00</span>
+                    <span class="metric-unit">kg CO₂e</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="carbon-chart" aria-label="Carbon footprint comparison chart" role="img"></canvas>
+                </div>
+            </div>
+
+            <!-- Rationale Card -->
+            <div class="rationale-card glass-card" id="rationale-card">
+                <h3 class="card-title">
+                    <span aria-hidden="true">🧮</span> Calculation Breakdown
+                </h3>
+                <p class="rationale-text" id="result-rationale"></p>
+            </div>
+
+            <!-- Swaps Panel -->
+            <div class="swaps-section" id="swaps-section">
+                <h3 class="section-title">
+                    <span aria-hidden="true">🔄</span> Personalized Green Swaps
+                </h3>
+                <div class="swaps-grid" id="swaps-grid">
+                    <!-- Dynamically populated -->
+                </div>
+            </div>
+
+            <!-- Accessibility Summary -->
+            <div class="accessibility-card glass-card" id="accessibility-card" role="region" aria-label="Accessibility summary for screen readers">
+                <h3 class="card-title">
+                    <span aria-hidden="true">♿</span> Accessibility Summary
+                </h3>
+                <p class="accessibility-text" id="result-accessibility" aria-live="polite"></p>
+            </div>
+
+            <!-- New Analysis Button -->
+            <button class="btn btn-outline btn-full" id="btn-new-analysis" type="button">
+                <span aria-hidden="true">🔄</span> Start New Analysis
+            </button>
+        </section>
+
+        <!-- ============ ERROR STATE ============ -->
+        <div class="error-card glass-card" id="error-card" style="display:none;" role="alert">
+            <span class="error-icon" aria-hidden="true">⚠️</span>
+            <p class="error-text" id="error-text"></p>
+            <button class="btn btn-outline" id="btn-dismiss-error" type="button">Dismiss</button>
+        </div>
+    </main>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="footer" id="footer">
+        <p>Built with 💚 for Google PromptWars × Hack2Skills | Powered by Gemini AI</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
