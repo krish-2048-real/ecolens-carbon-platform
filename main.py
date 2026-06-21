@@ -6,10 +6,12 @@ for the EcoLens Carbon Footprint Awareness Platform.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any, Dict
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,14 +24,16 @@ from schemas import (
     HealthCheckResponse,
     PersonalizedSwap,
 )
-from security import security_guard
-from utils import cleanup_upload, format_carbon_output, save_upload_file
+from security import SecurityGuard, security_guard
+
+# Initialize production logging
+logger: logging.Logger = logging.getLogger("ecolens.main")
 
 # ---------------------------------------------------------------------------
 # App initialization
 # ---------------------------------------------------------------------------
 
-app = FastAPI(
+app: FastAPI = FastAPI(
     title=settings.APP_TITLE,
     version=settings.APP_VERSION,
     description="Carbon Footprint Awareness Platform powered by Gemini AI",
@@ -49,7 +53,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # ---------------------------------------------------------------------------
-# Helper: lazy Gemini client instantiation
+# Dependencies & Helpers
 # ---------------------------------------------------------------------------
 
 _gemini_client: EcoLensGeminiClient | None = None
@@ -69,12 +73,30 @@ def get_gemini_client() -> EcoLensGeminiClient:
         try:
             _gemini_client = EcoLensGeminiClient()
         except GeminiClientError as exc:
+            logger.error("Failed to initialize Gemini client: %s", exc)
             raise HTTPException(status_code=503, detail=str(exc))
     return _gemini_client
 
 
-def _get_mock_result(user_input: str) -> dict:
-    text_lower = user_input.lower()
+def get_security_guard() -> SecurityGuard:
+    """Get the singleton SecurityGuard instance.
+
+    Returns:
+        SecurityGuard: The global security guard instance.
+    """
+    return security_guard
+
+
+def _get_mock_result(user_input: str) -> Dict[str, Any]:
+    """Retrieve fallback mock data dictionary based on keyword analysis of user input.
+
+    Args:
+        user_input: The raw query text from the user.
+
+    Returns:
+        Dict[str, Any]: Structured carbon footprint details.
+    """
+    text_lower: str = user_input.lower()
     
     # 1. UTILITIES / ENERGY CASE
     if any(k in text_lower for k in ["kwh", "electricity", "bill", "power", "light"]):
@@ -116,12 +138,19 @@ def _get_mock_result(user_input: str) -> dict:
         }
 
 
-def _map_mock_result(mock_data: dict) -> CarbonAnalysisResult:
-    """Helper to convert dictionary mock data to CarbonAnalysisResult Pydantic model."""
-    total_kg = mock_data["estimated_carbon_kg"]
-    swaps = []
+def _map_mock_result(mock_data: Dict[str, Any]) -> CarbonAnalysisResult:
+    """Helper to convert dictionary mock data to CarbonAnalysisResult Pydantic model.
+
+    Args:
+        mock_data: The raw dictionary output from the mock router.
+
+    Returns:
+        CarbonAnalysisResult: Validated Pydantic model for response serialization.
+    """
+    total_kg: float = mock_data["estimated_carbon_kg"]
+    swaps: list[PersonalizedSwap] = []
     for s in mock_data["personalized_swaps"]:
-        impact_reduction = 0.0
+        impact_reduction: float = 0.0
         if total_kg > 0:
             impact_reduction = round((s["estimated_co2_saved_kg"] / total_kg) * 100, 2)
         swaps.append(
@@ -138,7 +167,6 @@ def _map_mock_result(mock_data: dict) -> CarbonAnalysisResult:
         personalized_swaps=swaps,
         accessibility_summary=mock_data["accessibility_summary"]
     )
-
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +199,10 @@ async def health_check() -> HealthCheckResponse:
 
 
 @app.post("/api/analyze/text", response_model=CarbonAnalysisResponse)
-async def analyze_text(description: str = Form(...)) -> CarbonAnalysisResponse:
+async def analyze_text(
+    description: str = Form(...),
+    guard: SecurityGuard = Depends(get_security_guard),
+) -> CarbonAnalysisResponse:
     """Analyze a text description for carbon footprint estimation.
 
     Sanitizes input via SecurityGuard, sends to Gemini, and returns
@@ -179,6 +210,7 @@ async def analyze_text(description: str = Form(...)) -> CarbonAnalysisResponse:
 
     Args:
         description: Form field with the activity description.
+        guard: The injected SecurityGuard instance.
 
     Returns:
         CarbonAnalysisResponse: Wrapped analysis result with metadata.
@@ -186,15 +218,18 @@ async def analyze_text(description: str = Form(...)) -> CarbonAnalysisResponse:
     Raises:
         HTTPException: On validation or processing errors.
     """
+    logger.info("Received text analysis request")
+
     # Security check
-    is_safe, reason = security_guard.is_safe(description)
+    is_safe, reason = guard.is_safe(description)
     if not is_safe:
+        logger.warning("Security rejection for text input: %s", reason)
         raise HTTPException(
             status_code=400,
             detail=f"Security Alert: Request rejected due to policy violations. Reason: {reason}"
         )
 
-    sanitized: str = security_guard.sanitize_input(description)
+    sanitized: str = guard.sanitize_input(description)
 
     if not sanitized or len(sanitized.strip()) < 3:
         raise HTTPException(
@@ -206,8 +241,9 @@ async def analyze_text(description: str = Form(...)) -> CarbonAnalysisResponse:
         if settings.GEMINI_API_KEY == "DEMO_MODE":
             result = _map_mock_result(_get_mock_result(sanitized))
         else:
-            client = get_gemini_client()
-            result = client.analyze_text(sanitized)
+            client: EcoLensGeminiClient = get_gemini_client()
+            # Offload blocking synchronous client network call to threadpool
+            result = await run_in_threadpool(client.analyze_text, sanitized)
 
         return CarbonAnalysisResponse(
             success=True,
@@ -215,7 +251,8 @@ async def analyze_text(description: str = Form(...)) -> CarbonAnalysisResponse:
             timestamp=datetime.now(UTC).isoformat(),
             result=result,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Text API call failed, falling back to mock: %s", exc)
         return CarbonAnalysisResponse(
             success=True,
             input_type="text",
@@ -227,6 +264,7 @@ async def analyze_text(description: str = Form(...)) -> CarbonAnalysisResponse:
 @app.post("/api/analyze/image", response_model=CarbonAnalysisResponse)
 async def analyze_image(
     file: UploadFile = File(...),
+    guard: SecurityGuard = Depends(get_security_guard),
 ) -> CarbonAnalysisResponse:
     """Analyze an uploaded receipt/bill image for carbon footprint.
 
@@ -235,6 +273,7 @@ async def analyze_image(
 
     Args:
         file: The uploaded image file.
+        guard: The injected SecurityGuard instance.
 
     Returns:
         CarbonAnalysisResponse: Wrapped analysis result with metadata.
@@ -242,8 +281,11 @@ async def analyze_image(
     Raises:
         HTTPException: On invalid file type, size, or processing errors.
     """
+    filename: str = file.filename or ""
+    logger.info("Received image analysis request for file: %s", filename)
+
     # Validate file extension
-    if not security_guard.validate_file_extension(file.filename or ""):
+    if not guard.validate_file_extension(filename):
         raise HTTPException(
             status_code=422,
             detail=(
@@ -253,8 +295,9 @@ async def analyze_image(
         )
 
     # Security check
-    is_safe, reason = security_guard.is_safe(file.filename or "")
+    is_safe, reason = guard.is_safe(filename)
     if not is_safe:
+        logger.warning("Security rejection for image filename: %s", reason)
         raise HTTPException(
             status_code=400,
             detail=f"Security Alert: Request rejected due to policy violations. Reason: {reason}"
@@ -264,7 +307,7 @@ async def analyze_image(
     file_bytes: bytes = await file.read()
 
     # Validate file size
-    if not security_guard.validate_file_size(len(file_bytes)):
+    if not guard.validate_file_size(len(file_bytes)):
         raise HTTPException(
             status_code=422,
             detail=f"File too large. Maximum size: {settings.MAX_FILE_SIZE_MB}MB.",
@@ -275,10 +318,11 @@ async def analyze_image(
 
     try:
         if settings.GEMINI_API_KEY == "DEMO_MODE":
-            result = _map_mock_result(_get_mock_result(file.filename or ""))
+            result = _map_mock_result(_get_mock_result(filename))
         else:
-            client = get_gemini_client()
-            result = client.analyze_image(file_bytes, mime_type)
+            client: EcoLensGeminiClient = get_gemini_client()
+            # Offload blocking synchronous client network call to threadpool
+            result = await run_in_threadpool(client.analyze_image, file_bytes, mime_type)
 
         return CarbonAnalysisResponse(
             success=True,
@@ -286,12 +330,13 @@ async def analyze_image(
             timestamp=datetime.now(UTC).isoformat(),
             result=result,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Image API call failed, falling back to mock: %s", exc)
         return CarbonAnalysisResponse(
             success=True,
             input_type="image",
             timestamp=datetime.now(UTC).isoformat(),
-            result=_map_mock_result(_get_mock_result(file.filename or "")),
+            result=_map_mock_result(_get_mock_result(filename)),
         )
 
 
@@ -301,7 +346,7 @@ async def analyze_image(
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Any, exc: Exception) -> JSONResponse:
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all exception handler returning structured JSON errors.
 
     Args:
@@ -311,6 +356,7 @@ async def global_exception_handler(request: Any, exc: Exception) -> JSONResponse
     Returns:
         JSONResponse: Structured error response with 500 status.
     """
+    logger.exception("Unhandled exception occurred: %s", exc)
     return JSONResponse(
         status_code=500,
         content={
@@ -319,3 +365,4 @@ async def global_exception_handler(request: Any, exc: Exception) -> JSONResponse
             "timestamp": datetime.now(UTC).isoformat(),
         },
     )
+

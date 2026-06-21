@@ -7,12 +7,20 @@ misconfiguration.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import FrozenSet
 
 from dotenv import load_dotenv
+
+# Set up logging configuration early
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger: logging.Logger = logging.getLogger("ecolens.config")
 
 # Load .env file from project root
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
@@ -54,27 +62,23 @@ def load_config() -> AppConfig:
 
     Reads the GEMINI_API_KEY from the process environment. If the key is
     absent, the config is still created (tests run mocked), but a warning
-    is printed.
+    is logged.
 
     Returns:
         AppConfig: A frozen dataclass containing all validated settings.
-
-    Raises:
-        None: Prints a warning instead of raising if key is missing, so
-            test suites and health-check endpoints can still function.
     """
     api_key: str = os.getenv("GEMINI_API_KEY", "")
 
     if not api_key:
-        print(
-            "[EcoLens WARNING] GEMINI_API_KEY is not set. "
+        logger.warning(
+            "GEMINI_API_KEY is not set. "
             "The application will start but LLM features will be unavailable."
         )
 
-    config = AppConfig(GEMINI_API_KEY=api_key)
+    config: AppConfig = AppConfig(GEMINI_API_KEY=api_key)
 
     # Ensure the upload directory exists
-    upload_path = Path(config.UPLOAD_DIR)
+    upload_path: Path = Path(config.UPLOAD_DIR)
     upload_path.mkdir(parents=True, exist_ok=True)
 
     return config
